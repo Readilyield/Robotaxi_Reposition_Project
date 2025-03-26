@@ -7,9 +7,10 @@ import random
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from collections import defaultdict
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
-
+from PIL import Image
 
 ############################################
 '''Generate simple grid network version.1'''
@@ -179,7 +180,7 @@ class GridwithAgent:
         
     def place_on_edge(self, u, v, frac=0.5, kind='car'):
         '''Place car along an edge (fraction=0 at u, 1 at v)'''
-        assert(0 <= frac <= 1)
+        assert(0 <= frac <= 1.2)
         if kind == 'car':
             self.car_position = ('edge', (u, v, frac))
         elif kind == 'rdr':
@@ -272,7 +273,261 @@ class GridwithAgent:
         imagebox = OffsetImage(img, zoom=0.1)  # Adjust zoom as needed
         ab = AnnotationBbox(imagebox, coords, frameon=False)
         ax.add_artist(ab)
+
+    ###################
+    '''For animation'''
+    ###################
     
+    def visualize_animation(self, path_frames, show_path=False, path_color='r', 
+                            show_attribute=None, car_image_path=None, rdr_image_path=None,
+                            fps=10, save_path=None):
+        """
+        Creates animation of car moving along path with disappearing trail.
+        
+        Args:
+            path_frames: List from generate_animated_path()
+            show_attribute: Edge attribute to display
+            car_image_path/rdr_image_path: Optional image paths
+            fps: Frames per second
+            save_path: If provided, saves as GIF
+        """
+        fig, ax = plt.subplots(figsize=self.get_figure_size())
+        if show_path:
+            path_line, = ax.plot([], [], path_color+':', alpha=0.85, linewidth=2)
+        # Initialize plot elements
+        self.draw_network(ax, show_attribute)
+        
+        # Pre-compute all frame data
+        full_car_coords = []
+        full_rdr_coords = []
+        
+        if show_path:
+            full_path_coords = []
+        for i, frame in enumerate(path_frames):
+            coord = self.get_coord_from_frame(frame)
+            full_car_coords.append(coord)
+            if show_path:
+                full_path_coords.append(coord)
+                path_line, = ax.plot([],[],
+                    path_color+':', alpha=0.85, linewidth=2, zorder=1
+                    )
+        # Draw car and rider
+        car_artist = self._init_car_artist(ax, car_image_path)
+        rdr_artist = self._init_rdr_artist(ax, rdr_image_path)
+        
+        if self.car_position:
+            car_artist.zorder = 2
+            ax.add_artist(car_artist)
+        if self.rdr_position: 
+            rdr_artist.zorder = 2
+            ax.add_artist(rdr_artist)
+
+        def update(frame):
+            # Update path visualization
+            if show_path:
+                remaining_path = full_path_coords[frame:]
+                if len(remaining_path) > 0:
+                    path_line.set_data(
+                        [c[0] for c in remaining_path],
+                        [c[1] for c in remaining_path]
+                    )
+                else:
+                    path_line.set_data([], [])  # Clear when reached destination
+            
+            # Update car
+            if self.car_position:
+                car_coords = full_car_coords[frame]
+#                 self.car_position = car_coords
+                if car_image_path:
+                    car_artist.xy = car_coords
+                else:
+                    car_artist.set_data([car_coords[0]], [car_coords[1]])
+            
+            # Update rider if exists
+            if self.rdr_position:
+                rdr_coords = self.get_coord('rdr')
+                if rdr_image_path:
+                    rdr_artist.xy = rdr_coords
+                else:
+                    rdr_artist.set_data([rdr_coords[0]], [rdr_coords[1]])
+                    
+            if show_path:
+                return path_line, car_artist, rdr_artist
+            else: 
+                return car_artist, rdr_artist
+        
+        # Create animation
+        ani = animation.FuncAnimation(
+            fig, update, frames=len(path_frames),
+            interval=1000/fps, blit=True
+        )
+        
+        if save_path:
+            ani.save(save_path, writer='pillow', fps=fps)
+        
+        return ani
+
+    def _init_car_artist(self, ax, image_path):
+        """Initialize car artist based on visualization type"""
+        if image_path:
+            img = plt.imread(image_path)
+            imagebox = OffsetImage(img, zoom=0.1)
+            return AnnotationBbox(imagebox, (0,0), frameon=False)
+        else:
+            return ax.plot([], [], 'o', markersize=int(14*30/(self.mcols*self.nrows)),
+                          markerfacecolor=self.color_dict['car'],
+                          markeredgecolor=self.color_dict['car_ed'])[0]
+
+    def _init_rdr_artist(self, ax, image_path):
+        """Initialize rider artist based on visualization type"""
+        if image_path:
+            img = plt.imread(image_path)
+            imagebox = OffsetImage(img, zoom=0.1)
+            return AnnotationBbox(imagebox, (0,0), frameon=False)
+        else:
+            return ax.plot([], [], 'o', markersize=int(14*30/(self.mcols*self.nrows)),
+                          markerfacecolor=self.color_dict['rdr'],
+                          markeredgecolor=self.color_dict['rdr_ed'])[0]
+
+    def get_coord_from_frame(self, frame, kind='car'):
+        """Helper to get coordinates from animation frame data"""
+        
+        if isinstance(frame, int):  # Node
+            return self.pos[frame]
+        elif len(frame)==3:  # Edge
+            u, v, frac = frame
+            x1, y1 = self.pos[u]
+            x2, y2 = self.pos[v]
+            dx = self.pos[v][0] - self.pos[u][0]
+            dy = self.pos[v][1] - self.pos[u][1]
+            x_off = 0; y_off = 0
+            deg = np.degrees(np.arctan2(dy, dx))
+            
+            if dy==0: 
+                deg = 0
+                y_off = -self.offset*dx
+                if kind == 'rdr': y_off *= 2
+            elif dx==0:
+                x_off = self.offset*dy  
+                if kind == 'rdr': x_off *= 2
+            
+            return (x1+frac*(x2-x1)+x_off, y1+frac*(y2-y1)+y_off)
     
+
+#####################################
+'''Location-to-path util functions'''
+#####################################
+
+
+def generate_animated_path(raw_path: list) -> list:
+    """
+    Complete pipeline from raw path to animated frames with easing effect.
+    
+    1. First creates unified traversal path
+    2. Then generates animation frames with variable speed
+    
+    Args:
+        raw_path: List containing nodes, edges, or edge+fractions
+        
+    Returns:
+        List of animation frames: [(position, fraction), ...]
+    """
+    # Step 1: Create unified traversal path
+    traversal_path = create_traversal_path(raw_path)
+    
+    # Step 2: Generate animated frames
+    return convert_to_animation_frames(traversal_path)
+
+
+def create_traversal_path(raw_path: list) -> list:
+    """
+    Converts various path specifications into a unified traversal sequence.
+    
+    Handles:
+    - Node-to-node paths: [1, 2, 3] → [1, (1,2,1.0), 2, (2,3,1.0), 3]
+    - Node-to-edge paths: [1, 2, (2,3,0.5)] → [1, (1,2,1.0), 2, (2,3,0.5)]
+    - Edge-to-edge paths: [(1,2,0.3), (2,3,0.7)] → [(1,2,0.3), 2, (2,3,0.7)]
+    - Edge-to-node paths: [(1,2,0.3), (2,3,1.0), 3] → [(1,2,0.3), 2, (2,3,1.0), 3]
+
+    Args:
+        raw_path: List containing either:
+                  - Node IDs (integers)
+                  - Edge tuples (u, v)
+                  - Edge+position tuples (u, v, fraction)
+                  
+    Returns:
+        Unified traversal path alternating between:
+        - Nodes (integers)
+        - Full edges (u, v, 1.0)
+        - Partial edges (u, v, fraction)
+    """
+    if not raw_path:
+        return []
+    
+    path = []
+    prev_item = None
+    
+    for item in raw_path:
+        if isinstance(item, int):  # Node
+            if prev_item is None:
+                path.append(item)
+            elif isinstance(prev_item, int):
+                path.append((prev_item,item,1.0))
+            elif len(prev_item) >= 2:  # Full edge or Partial edge
+                if prev_item[1] != item:
+                    raise ValueError(f"Edge {prev_item} doesn't connect to edge {item}")
+                path.append(item)
+        
+        elif isinstance(item, tuple):  # Edge
+            if len(item) == 2:
+                u, v = item
+                item = (u,v,1.0)
+            if prev_item is None:
+                path.append(item)
+            elif isinstance(prev_item, int):
+                if prev_item != item[0]:
+                    raise ValueError(f"Node {prev_item} doesn't connect to edge {item}")
+                path.append(item)
+            elif len(prev_item) == 3:  # Partial edge
+                if prev_item[1] != item[0]:
+                    raise ValueError(f"Edge {prev_item} doesn't connect to edge {item}")
+                path.append(item)
+        prev_item = item
+    
+    return path
+
+def convert_to_animation_frames(traversal_path: list) -> list:
+    """Converts unified path to animation frames with easing"""
+    frames = []
+    
+    for i, item in enumerate(traversal_path):
+        if isinstance(item, int):  # Node
+            frames.append(item)
+        elif len(item) == 3:
+            u, v, frac = item
+            if frac > 0.9: frac = 0.9
+            if i == 0: 
+                frames.append(item)
+            else:
+                frames.extend(generate_edge_frames(u, v, frac))
+    return frames
+
+def generate_edge_frames(u: int, v: int, frac: float) -> list:
+    """Generates eased frames for an edge segment"""
+    # Determine snapshot count
+    if frac <= 0.3:
+        n = 3
+    elif frac <= 0.6:
+        n = 6 
+    else:
+        n = 8
+    
+    # Create eased distribution (slow-fast-slow)
+    t = np.linspace(0, 1, n)
+    fractions = frac * (np.sin((t - 0.5) * np.pi) + 1) / 2
+    
+    return [(u, v, f) for f in fractions]
+
+
         
         
