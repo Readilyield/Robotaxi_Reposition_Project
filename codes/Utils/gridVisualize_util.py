@@ -507,12 +507,27 @@ def convert_to_animation_frames(traversal_path: list) -> list:
             u, v, frac = item
             if frac > 0.9: frac = 0.9
             if i == 0: 
-                frames.append(item)
+                if len(traversal_path) > i:
+                    next_item  = traversal_path[i+1]
+                    if isinstance(item, list) and len(next_item) == 3:
+                        if next_item[0] == u: #on the same edge
+                            frames = generate_edge_frames(u, v, next_item[-1], 
+                                                          frac_start=frac)
+                            continue
+                    #definitely will travel through current edge
+                    frames = generate_edge_frames(u, v, 0.9, 
+                                                   frac_start=frac)
             else:
+                last_item  = traversal_path[i-1]
+                if isinstance(item, list) and len(last_item) == 3:
+                    if next_item[0] == u: #on the same edge
+                        frames.extend(generate_edge_frames(u, v, frac, 
+                                                           frac_start=last_item[-1]))
+                        continue         
                 frames.extend(generate_edge_frames(u, v, frac))
     return frames
 
-def generate_edge_frames(u: int, v: int, frac: float) -> list:
+def generate_edge_frames(u: int, v: int, frac: float, frac_start=0) -> list:
     """Generates eased frames for an edge segment"""
     # Determine snapshot count
     if frac <= 0.3:
@@ -523,8 +538,8 @@ def generate_edge_frames(u: int, v: int, frac: float) -> list:
         n = 8
     
     # Create eased distribution (slow-fast-slow)
-    t = np.linspace(0, 1, n)
-    fractions = frac * (np.sin((t - 0.5) * np.pi) + 1) / 2
+    t = np.linspace(frac_start, 1, n)
+    fractions = frac * (np.sin((t - 0.45) * np.pi) + 1) / 2
     
     return [(u, v, f) for f in fractions]
 
