@@ -32,6 +32,7 @@ excluded_location_ids = [
     103,
     104,
     105,
+    46, # Bronx City Island
     1, # EWR Airport (Ridesharing app pickups and dropoffs at EWR are banned.)
     2, # Jamaica Bay
     194, # Randalls Island
@@ -47,5 +48,3 @@ location_id_to_index = {id_: i for i, id_ in enumerate(location_ids)}
 num_locations = len(location_ids)
 
 taxi_type = 'fhvhv' # 'green', 'fhv', 'fhvhv'
-YEARS = ['2021', '2022', '2023', '2024']
-MONTHS = ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12']
