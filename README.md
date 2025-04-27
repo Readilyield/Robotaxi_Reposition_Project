@@ -13,13 +13,18 @@ This project applies the relocaiton matrix lookahead policy proposed by Braverma
 - Numpy
 - Matplotlib
 - Networkx
+- optional:<br>
+  | osmnx==2.0.1    | contextily==1.6.2 | gurobipy==12.0.1 | fastparquet==2024.11.0 <br>
+  | pyarrow==19.0.1 | tqdm==4.67.1      | holidays==0.70
+
 #### File structure:
-- nyc_trip
-    -|> Constructing NYC Taxi Grid -> notebook to visualize relocation in the NYC map 
-    -|> Learning Model Params      -> notebook to learn parameters of the relocation algo from NYC taxi data
-    -|> Solve Relocation Matrix    -> *core* notebook to solve relocation matrix, we can mod constraints here
-    -|> Qs.npz                     -> solved relocation matrix for discrete-time lookahead policy (in package)
-- simulate
-    -|> simulate                   -> notebook to run simulation and evaluate the relocation matrix's effectiveness
-    -|> simulate.py                -> classes and objects for running the simulation 
+
+	|- nyc_trip
+    	|-> Constructing NYC Taxi Grid  ::  Visualize relocation in the NYC map 
+    	|-> Learning Model Params  ::  Learn parameters of the relocation algo from NYC taxi data
+    	|-> Solve Relocation Matrix  ::  Solve relocation matrix, we can mod constraints here
+    	|-> Qs.npz  ::  solved relocation matrix
+	|- simulate
+    	|-> simulate  ::  Run simulation and evaluate the relocation matrix's effectiveness
+    	|-> simulate.py  ::  Classes and objects for running the simulation 
 
