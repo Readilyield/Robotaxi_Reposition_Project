@@ -18,7 +18,7 @@ This project applies the relocaiton matrix lookahead policy proposed by Braverma
   | pyarrow==19.0.1 | tqdm==4.67.1      | holidays==0.70
 
 #### File structure:
-
+	|-> Notation  ::  Notations and formulations
 	|- nyc_trip
     	|-> Constructing NYC Taxi Grid  ::  Visualize relocation in the NYC map 
     	|-> Learning Model Params  ::  Learn parameters of the relocation algo from NYC taxi data
