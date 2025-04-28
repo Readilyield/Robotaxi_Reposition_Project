@@ -9,7 +9,8 @@ from constants import (
     RELOCATION_START,
     RELOCATION_COMPLETION,
     RIDE_START,
-    TIME_BLOCK_BOUNDARY
+    TIME_BLOCK_BOUNDARY,
+    TAXI_INIT
 )
 
 @dataclass(order=True)
@@ -100,6 +101,14 @@ class TaxiSimulator:
             vehicle = Vehicle(vehicle_id=i, location=region)
             self.vehicles.append(vehicle)
             self.idle_queues[region].append(vehicle)
+        
+        for region in range(self.R):
+            self.event_queue.push(Event(
+                time=0.0,
+                priority=-1,
+                event_type=TAXI_INIT,
+                data={'num_vehicles': len(self.idle_queues[region]), 'region': region}
+            ))
 
         # Schedule first rider arrival at each region
         for i in range(self.R):
@@ -145,7 +154,7 @@ class TaxiSimulator:
                 self.event_queue.push(Event(
                     time=event_time,
                     priority=0,
-                    event_type='rider_arrival',
+                    event_type=RIDER_ARRIVAL,
                     data={'region': region, 'origin_time_block': time_block}
                 ))
 
@@ -218,7 +227,7 @@ class TaxiSimulator:
                       'destination': destination, 'travel_time': travel_time}
             ))
         else:
-            self.logger.append({'time': scheduled_time, 'event_type': 'rider_lost', 'data': {'region': region}})
+            self.logger.append({'time': scheduled_time, 'event_type': RIDER_LOST, 'data': {'region': region}})
 
         self.next_arrival.pop(region, None)
         self.schedule_next_rider_arrival(region)
