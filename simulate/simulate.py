@@ -9,7 +9,16 @@ from constants import (
     RELOCATION_START,
     RELOCATION_COMPLETION,
     RIDE_START,
-    TIME_BLOCK_BOUNDARY
+    TIME_BLOCK_BOUNDARY,
+    TAXI_INIT,
+    
+    IS_RELOCATING,
+    IS_ON_TRIP,
+    IS_IDLE,
+)
+from relocation_policies import (
+    relocation_policy_blind_sampling,
+    relocation_policy_jlcr_eta,
 )
 
 @dataclass(order=True)
@@ -46,14 +55,17 @@ class EventQueue:
 class Vehicle:
     vehicle_id: int
     location: int
+    status: str
     available_time: float = 0.0
-    is_relocating: bool = False
-
+    target_location: Optional[int] = None
 
 # Simulator Core
 class TaxiSimulator:
     def __init__(self, T: int, R: int, N: int, lambda_: np.ndarray,
-                 mu_: np.ndarray, P: np.ndarray, Q: np.ndarray):
+                 mu_: np.ndarray, P: np.ndarray, Q: np.ndarray, 
+                 relocation_policy: Callable,
+                 relocation_kwargs: Optional[Dict[str, Any]] = None
+                 ):
         """
         Initialize the Taxi Simulator with system parameters.
 
@@ -83,6 +95,9 @@ class TaxiSimulator:
         self.idle_queues: Dict[int, List[Vehicle]] = {i: [] for i in range(R)}
         self.next_arrival: Dict[int, float] = {}
         
+        self.relocation_policy = relocation_policy
+        self.relocation_kwargs = relocation_kwargs or {}
+        
     def initialize(self, max_time: float):
         """
         Initialize simulation state:
@@ -97,9 +112,17 @@ class TaxiSimulator:
         # Randomly distribute vehicles initially
         for i in range(self.N):
             region = np.random.choice(self.R)
-            vehicle = Vehicle(vehicle_id=i, location=region)
+            vehicle = Vehicle(vehicle_id=i, location=region, status=IS_IDLE)
             self.vehicles.append(vehicle)
             self.idle_queues[region].append(vehicle)
+        
+        for region in range(self.R):
+            self.event_queue.push(Event(
+                time=0.0,
+                priority=-1,
+                event_type=TAXI_INIT,
+                data={'num_vehicles': len(self.idle_queues[region]), 'region': region}
+            ))
 
         # Schedule first rider arrival at each region
         for i in range(self.R):
@@ -145,7 +168,7 @@ class TaxiSimulator:
                 self.event_queue.push(Event(
                     time=event_time,
                     priority=0,
-                    event_type='rider_arrival',
+                    event_type=RIDER_ARRIVAL,
                     data={'region': region, 'origin_time_block': time_block}
                 ))
 
@@ -201,24 +224,27 @@ class TaxiSimulator:
             event (Event): The rider arrival event.
         """
         region = event.data['region']
-        scheduled_time = event.time
-        if self.next_arrival.get(region, float('inf')) > scheduled_time:
+        current_time = event.time
+        if self.next_arrival.get(region, float('inf')) > current_time:
             return
 
-        time_block = self.get_time_block(scheduled_time)
+        time_block = self.get_time_block(current_time)
         if self.idle_queues[region]:
             vehicle = self.idle_queues[region].pop(0)
             destination = np.random.choice(self.R, p=self.P[time_block, region])
+            vehicle.status = IS_ON_TRIP
+            vehicle.target_location = destination
+            
             travel_time = np.random.exponential(1 / self.mu_[time_block, region, destination])
             self.event_queue.push(Event(
-                time=scheduled_time,
+                time=current_time,
                 priority=1,
-                event_type='ride_start',
+                event_type=RIDE_START,
                 data={'vehicle_id': vehicle.vehicle_id, 'origin': region,
                       'destination': destination, 'travel_time': travel_time}
             ))
         else:
-            self.logger.append({'time': scheduled_time, 'event_type': 'rider_lost', 'data': {'region': region}})
+            self.logger.append({'time': current_time, 'event_type': RIDER_LOST, 'data': {'region': region}})
 
         self.next_arrival.pop(region, None)
         self.schedule_next_rider_arrival(region)
@@ -233,7 +259,7 @@ class TaxiSimulator:
             event (Event): Time block boundary event for a specific region.
         """
         region = event.data['region']
-        current_time_block = self.get_time_block(self.clock)
+        current_time_block = self.get_time_block(event.time)
         rate = self.lambda_[current_time_block, region]
         if rate > 0:
             new_arrival_interval = np.random.exponential(1 / rate)
@@ -243,7 +269,7 @@ class TaxiSimulator:
                 self.event_queue.push(Event(
                     time=new_arrival_time,
                     priority=0,
-                    event_type='rider_arrival',
+                    event_type=RIDER_ARRIVAL,
                     data={'region': region, 'origin_time_block': current_time_block}
                 ))
 
@@ -280,17 +306,18 @@ class TaxiSimulator:
         """
         vehicle = self.vehicles[event.data['vehicle_id']]
         vehicle.location = event.data['destination']
-        vehicle.is_relocating = False
         time_block = self.get_time_block(event.time)
+        vehicle.status = IS_IDLE
+        vehicle.target_location = None
         
-        relocation_dest = np.random.choice(self.R, p=self.Q[time_block, vehicle.location])
+        
+        relocation_dest = self.relocation_policy(vehicle, event.time, self, **self.relocation_kwargs)
         if relocation_dest != vehicle.location:
             travel_time = np.random.exponential(1 / self.mu_[time_block, vehicle.location, relocation_dest])
-            vehicle.is_relocating = True
             self.event_queue.push(Event(
                 time=event.time,
                 priority=3,
-                event_type='relocation_start',
+                event_type=RELOCATION_START,
                 data={'vehicle_id': vehicle.vehicle_id, 'origin': vehicle.location,
                       'destination': relocation_dest, 'travel_time': travel_time}
             ))
@@ -307,6 +334,8 @@ class TaxiSimulator:
         """
         vehicle = self.vehicles[event.data['vehicle_id']]
         vehicle.available_time = event.time + event.data['travel_time']
+        vehicle.status = IS_RELOCATING
+        vehicle.target_location = event.data['destination']
 
         self.event_queue.push(Event(
             time=vehicle.available_time,
@@ -326,7 +355,9 @@ class TaxiSimulator:
         """
         vehicle = self.vehicles[event.data['vehicle_id']]
         vehicle.location = event.data['destination']
-        vehicle.is_relocating = False
+        vehicle.status = IS_IDLE
+        vehicle.target_location = None
+        
         self.idle_queues[vehicle.location].append(vehicle)
 
 
