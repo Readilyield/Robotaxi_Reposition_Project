@@ -23,15 +23,22 @@ from relocation_policies import (
 
 @dataclass(order=True)
 class Event:
+    """
+    Represents a discrete event in the simulation with an associated time and type.
+    Events are ordered by time and processed chronologically via a priority queue.
+    """
+
     time: float
     priority: int
     event_type: str = field(compare=False)
     data: Dict[str, Any] = field(compare=False, default_factory=dict)
 
-
-
 # EventQueue manages the priority queue of events
 class EventQueue:
+    """
+    A simple priority queue to manage simulation events using a min-heap.
+    Events are executed in time-priority order.
+    """
     def __init__(self):
         self.events: List[Event] = []
 
@@ -64,7 +71,9 @@ class TaxiSimulator:
     def __init__(self, T: int, R: int, N: int, lambda_: np.ndarray,
                  mu_: np.ndarray, P: np.ndarray, Q: np.ndarray, 
                  relocation_policy: Callable,
-                 relocation_kwargs: Optional[Dict[str, Any]] = None
+                 relocation_kwargs: Optional[Dict[str, Any]] = None,
+                 use_real_demand=False,
+                 demand_events=None,
                  ):
         """
         Initialize the Taxi Simulator with system parameters.
@@ -98,6 +107,9 @@ class TaxiSimulator:
         self.relocation_policy = relocation_policy
         self.relocation_kwargs = relocation_kwargs or {}
         
+        self.use_real_demand = use_real_demand
+        self.demand_events = demand_events
+        
     def initialize(self, max_time: float):
         """
         Initialize simulation state:
@@ -124,19 +136,47 @@ class TaxiSimulator:
                 data={'num_vehicles': len(self.idle_queues[region]), 'region': region}
             ))
 
-        # Schedule first rider arrival at each region
-        for i in range(self.R):
-            self.schedule_next_rider_arrival(i)
-            for block in range(1, self.T):
-                t = block * (24 / self.T)
-                while t < max_time:
-                    self.event_queue.push(Event(
-                        time=t,
-                        priority=5,
-                        event_type=TIME_BLOCK_BOUNDARY,
-                        data={'region': i}
-                    ))
-                    t += 24
+        if self.use_real_demand and self.demand_events is not None:
+            for event in self.demand_events:
+                self.event_queue.push(Event(
+                    time=event['t_sim'],
+                    priority=0,
+                    event_type=RIDER_ARRIVAL,
+                    data={
+                        'region': event['pu_idx'],
+                        'destination': event['do_idx'],
+                        'trip_time': event['trip_time_hr'],
+                    }
+                ))
+        
+        else:
+            # Schedule first rider arrival at each region
+            for i in range(self.R):
+                self.schedule_next_rider_arrival(i)
+                for block in range(1, self.T):
+                    t = block * (24 / self.T)
+                    while t < max_time:
+                        self.event_queue.push(Event(
+                            time=t,
+                            priority=5,
+                            event_type=TIME_BLOCK_BOUNDARY,
+                            data={'region': i}
+                        ))
+                        t += 24
+
+    def run(self, max_time: float):
+        """
+        Run the simulation until reaching max_time or until no more events.
+
+        Args:
+            max_time (float): The simulation horizon in hours.
+        """
+        self.initialize(max_time)
+        while not self.event_queue.is_empty() and self.clock < max_time:
+            event = self.event_queue.pop()
+            if event:
+                self.clock = event.time
+                self.handle_event(event)
 
     def get_time_block(self, time: float) -> int:
         """
@@ -171,21 +211,6 @@ class TaxiSimulator:
                     event_type=RIDER_ARRIVAL,
                     data={'region': region, 'origin_time_block': time_block}
                 ))
-
-
-    def run(self, max_time: float):
-        """
-        Run the simulation until reaching max_time or until no more events.
-
-        Args:
-            max_time (float): The simulation horizon in hours.
-        """
-        self.initialize(max_time)
-        while not self.event_queue.is_empty() and self.clock < max_time:
-            event = self.event_queue.pop()
-            if event:
-                self.clock = event.time
-                self.handle_event(event)
 
     def handle_event(self, event: Event):
         """
@@ -231,11 +256,17 @@ class TaxiSimulator:
         time_block = self.get_time_block(current_time)
         if self.idle_queues[region]:
             vehicle = self.idle_queues[region].pop(0)
-            destination = np.random.choice(self.R, p=self.P[time_block, region])
+            
+            if self.use_real_demand:
+                destination = event.data['destination']
+                travel_time = event.data['trip_time']
+            else:
+                destination = np.random.choice(self.R, p=self.P[time_block, region])
+                travel_time = np.random.exponential(1 / self.mu_[time_block, region, destination])
+
             vehicle.status = IS_ON_TRIP
             vehicle.target_location = destination
             
-            travel_time = np.random.exponential(1 / self.mu_[time_block, region, destination])
             self.event_queue.push(Event(
                 time=current_time,
                 priority=1,
@@ -248,31 +279,6 @@ class TaxiSimulator:
 
         self.next_arrival.pop(region, None)
         self.schedule_next_rider_arrival(region)
-
-    def handle_time_block_boundary(self, event: Event):
-        """
-        Resample the rider arrival time at the boundary of a time block
-        to adapt to sudden changes in arrival rates (λ).
-        Only schedules a new arrival if it's sooner than the existing one.
-
-        Args:
-            event (Event): Time block boundary event for a specific region.
-        """
-        region = event.data['region']
-        current_time_block = self.get_time_block(event.time)
-        rate = self.lambda_[current_time_block, region]
-        if rate > 0:
-            new_arrival_interval = np.random.exponential(1 / rate)
-            new_arrival_time = self.clock + new_arrival_interval
-            if region not in self.next_arrival or new_arrival_time < self.next_arrival[region]:
-                self.next_arrival[region] = new_arrival_time
-                self.event_queue.push(Event(
-                    time=new_arrival_time,
-                    priority=0,
-                    event_type=RIDER_ARRIVAL,
-                    data={'region': region, 'origin_time_block': current_time_block}
-                ))
-
 
     def handle_ride_start(self, event: Event):
         """
@@ -293,7 +299,6 @@ class TaxiSimulator:
                   'origin': event.data['origin'],
                   'destination': event.data['destination']}
         ))
-
 
     def handle_ride_completion(self, event: Event):
         """
@@ -323,7 +328,6 @@ class TaxiSimulator:
             ))
         else:
             self.idle_queues[vehicle.location].append(vehicle)
-
 
     def handle_relocation_start(self, event: Event):
         """
@@ -360,6 +364,29 @@ class TaxiSimulator:
         
         self.idle_queues[vehicle.location].append(vehicle)
 
+    def handle_time_block_boundary(self, event: Event):
+        """
+        Resample the rider arrival time at the boundary of a time block
+        to adapt to sudden changes in arrival rates (λ).
+        Only schedules a new arrival if it's sooner than the existing one.
+
+        Args:
+            event (Event): Time block boundary event for a specific region.
+        """
+        region = event.data['region']
+        current_time_block = self.get_time_block(event.time)
+        rate = self.lambda_[current_time_block, region]
+        if rate > 0:
+            new_arrival_interval = np.random.exponential(1 / rate)
+            new_arrival_time = self.clock + new_arrival_interval
+            if region not in self.next_arrival or new_arrival_time < self.next_arrival[region]:
+                self.next_arrival[region] = new_arrival_time
+                self.event_queue.push(Event(
+                    time=new_arrival_time,
+                    priority=0,
+                    event_type=RIDER_ARRIVAL,
+                    data={'region': region, 'origin_time_block': current_time_block}
+                ))
 
 
 # import ace_tools as tools; tools.display_dataframe_to_user(name="Logger", dataframe=[])
