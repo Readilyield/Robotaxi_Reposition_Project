@@ -74,6 +74,7 @@ class TaxiSimulator:
                  relocation_kwargs: Optional[Dict[str, Any]] = None,
                  use_real_demand=False,
                  demand_events=None,
+                 start_time=0.0,
                  ):
         """
         Initialize the Taxi Simulator with system parameters.
@@ -96,7 +97,7 @@ class TaxiSimulator:
         self.Q = Q
 
         self.vehicles: List[Vehicle] = []
-        self.clock: float = 0.0
+        self.clock: float = start_time
         self.event_queue = EventQueue()
         self.logger: List[Dict[str, Any]] = []
 
@@ -127,6 +128,8 @@ class TaxiSimulator:
             vehicle = Vehicle(vehicle_id=i, location=region, status=IS_IDLE)
             self.vehicles.append(vehicle)
             self.idle_queues[region].append(vehicle)
+        
+        start_time = self.clock
         
         for region in range(self.R):
             self.event_queue.push(Event(
