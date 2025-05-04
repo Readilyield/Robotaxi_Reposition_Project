@@ -250,14 +250,18 @@ class TaxiSimulator:
         """
         region = event.data['region']
         current_time = event.time
-        if self.next_arrival.get(region, float('inf')) > current_time:
-            return
+        if not self.use_real_demand:
+            if self.next_arrival.get(region, float('inf')) > current_time:
+                return
 
         time_block = self.get_time_block(current_time)
         if self.idle_queues[region]:
             vehicle = self.idle_queues[region].pop(0)
             
             if self.use_real_demand:
+                if 'destination' not in event.data:
+                    print(event) #check if an error occurs
+                 
                 destination = event.data['destination']
                 travel_time = event.data['trip_time']
             else:
@@ -277,8 +281,9 @@ class TaxiSimulator:
         else:
             self.logger.append({'time': current_time, 'event_type': RIDER_LOST, 'data': {'region': region}})
 
-        self.next_arrival.pop(region, None)
-        self.schedule_next_rider_arrival(region)
+        if not self.use_real_demand:
+            self.next_arrival.pop(region, None)
+            self.schedule_next_rider_arrival(region)
 
     def handle_ride_start(self, event: Event):
         """

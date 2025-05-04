@@ -29,13 +29,89 @@ YEARS = list(range(2019, 2025))
 
 us_holidays = holidays.US(years=YEARS)
 
+'''This function runs one simulation for each of:
+   1. no relocation
+   2. relocation with a pre-specified Q matrix
+   3. shortest_wait policy 
+   4. JLCR policy'''
+def run_simulations_for_seed(
+    seed: int,
+    lambda_: np.ndarray,
+    mu_: np.ndarray,
+    P: np.ndarray,
+    Q_base: np.ndarray,
+    Q_path: str,
+    arrival_events: list,
+    T: int,
+    R: int,
+    N: int,
+    max_time: float,
+    eta: float = 0.5,
+    output_dir: str = "sim_outputs"
+):
+    np.random.seed(seed)
+
+    # sampling_modes = ["synthetic", "real"]
+    sampling_modes =["real"]
+    relocation_modes = {
+        "no_reloc": {"policy": relocation_policy_blind_sampling, "Q": Q_base},
+        "JLCR": {"policy": relocation_policy_jlcr_eta, "Q": Q_base},
+        "shortest_wait": {"policy": relocation_policy_shortest_wait, "Q": Q_base},
+        "fluidBased_policy": {"policy": relocation_policy_blind_sampling, "Q_path": Q_path},
+    }
+
+    for sampling in sampling_modes:
+        use_real = sampling == "real"
+        for reloc_key, config in relocation_modes.items():
+            
+            # Load Q matrix
+            if "Q_path" in config:
+                with np.load(config["Q_path"]) as data:
+                    Q = data["Q"]
+            else:
+                Q = config["Q"]
+
+            # Setup relocation policy
+            policy = config["policy"]
+            kwargs = {"eta": eta} if reloc_key == "JLCR" else {}
+
+            # Init simulator
+            sim = TaxiSimulator(
+                T=T,
+                R=R,
+                N=N,
+                lambda_=lambda_,
+                mu_=mu_,
+                P=P,
+                Q=Q,
+                relocation_policy=policy,
+                relocation_kwargs=kwargs,
+                use_real_demand=use_real,
+                demand_events=arrival_events if use_real else None,
+            )
+
+            # Run sim
+            sim.run(max_time=max_time)
+            df_log = pd.DataFrame(sim.logger)
+
+            # Save
+            seed_dir = os.path.join(output_dir, str(seed))
+            os.makedirs(seed_dir, exist_ok=True)
+            fname = f"{sampling}Fix_demand__{reloc_key}.csv"
+            df_log.to_csv(os.path.join(seed_dir, fname), index=False)
+            
+            print(f"[Seed {seed}] finished: {sampling} / {reloc_key}")
+
+
 def prepare_arrival_events_from_real_data(df, num_days=3):
     """
     Given a pre-filtered NYC trip dataframe (weekdays, valid IDs, etc.),
-    extract a simulation-ready list of rider arrival events across `num_days` consecutive calendar days.
+    extract a simulation-ready list of rider arrival events across `num_days` 
+    consecutive calendar days.
 
     Returns:
-        events (List[Dict]): List of events with simulation time, origin, destination, and trip_time (in hours).
+        events (List[Dict]): List of events with simulation time, 
+        origin, destination, and trip_time (in hours).
     """
     unique_dates = df.pickup_datetime.dt.date.unique()
     working_days = [date for date in unique_dates if date.weekday() < 5 and date not in us_holidays]
@@ -154,7 +230,6 @@ def plot_arrival_versus_ridestarts(df_log, region_id, bin_minutes):
         count_col='num_lost_rides'
     )
     
-
     sns.set(style="whitegrid")
     plt.figure(figsize=(12, 6))
     plt.plot(arrival_ts['time_bin'], arrival_ts['num_arrivals'], label='Rider Arrivals', color='blue')
@@ -216,7 +291,8 @@ def plot_simulation_grid_for_strategies(
             print(f"No arrival data for strategy {strategy}.")
             continue
 
-        start_time = arrival_ts['time_bin'].min() + timedelta(days=2)
+        # start_time = arrival_ts['time_bin'].min() + timedelta(days=2)
+        start_time = arrival_ts['time_bin'].min()
         end_time = arrival_ts['time_bin'].max()
 
         arrival_ts = fill_missing_time_bins(arrival_ts, start_time, end_time, bin_minutes, count_col='num_arrivals')
@@ -282,12 +358,12 @@ def compute_system_metrics(df_log: pd.DataFrame, T: int, R: int, N: int) -> dict
     ride_durations = ride_completions['data'].apply(lambda x: x.get('travel_time', 0))
     relocation_durations = relocation_completions['data'].apply(lambda x: x.get('travel_time', 0))
 
-    total_ride_time = ride_durations.sum()
-    total_relocation_time = relocation_durations.sum()
+    mean_ride_time = ride_durations.mean()
+    mean_relocation_time = relocation_durations.mean()
 
-    utilization_rate = total_ride_time / total_vehicle_time
-    idle_vehicle_fraction = 1 - (total_ride_time + total_relocation_time) / total_vehicle_time
-    empty_relocation_ratio = total_relocation_time / total_vehicle_time
+    utilization_rate = mean_ride_time / total_sim_time
+    idle_vehicle_fraction = 1 - (mean_ride_time + mean_relocation_time) / total_sim_time
+    empty_relocation_ratio = mean_relocation_time /total_sim_time
 
     # --- 4. Peak abandonment over time bins ---
     arrivals['region'] = arrivals['data'].apply(lambda x: x['region'])
@@ -317,16 +393,18 @@ def compute_system_metrics(df_log: pd.DataFrame, T: int, R: int, N: int) -> dict
     return {
         'abandonment_rate': round(abandonment_rate, 4),
         'fulfillment_rate': round(fulfillment_rate, 4),
-        'utilization_rate': round(utilization_rate, 4),
-        'idle_vehicle_fraction': round(idle_vehicle_fraction, 4),
-        'empty_relocation_ratio': round(empty_relocation_ratio, 4),
+        'mean_utilization_rate': round(utilization_rate, 4),
+        'mean_idle_vehicle_fraction': round(idle_vehicle_fraction, 4),
+        'mean_empty_relocation_ratio': round(empty_relocation_ratio, 4),
         'peak_abandonment_rate': round(peak_abandonment_rate, 4),
         'relocations_per_vehicle_per_hour': round(relocations_per_vehicle_per_hour, 4),
         'max_regional_abandonment_rate': round(max_abandonment_region, 4),
         'std_fulfillment_across_regions': round(std_fulfillment_across_regions, 4),
     }
 
-def summarize_multiple_runs(setting_name: str, T: int, R: int, N: int, base_dir: str = "sim_outputs") -> pd.DataFrame:
+def summarize_multiple_runs(setting_name: str, 
+                            T: int, R: int, N: int, 
+                            base_dir: str = "sim_outputs") -> pd.DataFrame:
     """
     Summarize multiple runs of the same simulation setting.
 
@@ -341,7 +419,8 @@ def summarize_multiple_runs(setting_name: str, T: int, R: int, N: int, base_dir:
         pd.DataFrame: with metrics as rows, and columns ['mean', 'std']
     """
     metrics_list = []
-    run_dirs = sorted([d for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d)) and d.isdigit()])
+    run_dirs = sorted([d for d in os.listdir(base_dir) 
+                       if os.path.isdir(os.path.join(base_dir, d)) and d.isdigit()])
 
     for run_id in run_dirs:
         filepath = os.path.join(base_dir, run_id, setting_name)
