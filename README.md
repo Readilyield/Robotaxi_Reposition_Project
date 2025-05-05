@@ -6,7 +6,7 @@ This project focuses on the effect of fleet size and the tradeoff between maximi
 This project applies the relocaiton matrix lookahead policy proposed by Braverman et al. (Empty-car Routing in Ridesharing Systems) and utilizes NYC taxi data to demonstrate the results.
 
 ### Data processing pipeline:
-1. Download data and save in **nyc_trip/data** directory <br>
+1. Download data and save in **nyc_trip/training data (or testing data)** directory <br>
    Download source [here](https://www.nyc.gov/site/tlc/about/tlc-trip-record-data.page) <br>
    (default `taxi_type` is `fhvhv`: for-hire vehicle high volume) <br>
    They should look like: `fhv_tripdata_2025-01.parquet`. <br>
@@ -33,14 +33,13 @@ tbd
 #### File structure:
 	|-> Notation  ::  Notations and formulations
 	|- nyc_trip
-    	|-> 
+	|- training data :: data parquets for training (to learn params and generate Q matrix)
+    	|- testing data :: data parquets for testing
     	|-> Learning Model Params  ::  Learn parameter and constants in the fluid-based relocation policy
     	|-> Solve Relocation Matrix  ::  Solve the relocation matrix, you can change the formulation here
         |-> Visualize_Relocation_Map  ::  Visualize relocation policy over NYC regionalized map 
-    	|-> Qs.npz  ::  solved relocation matrix
-        |-> trip_data.npz :: consilidated real trip data as training and testing set
-        |-> mu.npz :: reciprocals of trip travel times (service rates) learned from trip data 
 	|- simulate
     	|-> simulate  ::  Run simulation and evaluate the relocation matrix's effectiveness
-    	|-> simulate.py  ::  Classes and objects for running the simulation 
+    	|-> simulate.py  ::  Classes and objects for running the simulation
+        |-> utils.py :: Helper functions to run multi-method simulation and display results 
 
