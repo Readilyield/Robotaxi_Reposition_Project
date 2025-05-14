@@ -248,7 +248,8 @@ def plot_simulation_grid_for_strategies(
     strategies: list,
     region_id: int,
     bin_minutes: int = 20,
-    log_dir: str = "sim_outputs"
+    log_dir: str = "sim_outputs",
+    start_time: str = '2025-01-02'
 ):
     """
     Plot rider arrival, ride start, and lost rider time series (binned)
@@ -265,10 +266,13 @@ def plot_simulation_grid_for_strategies(
     # Internal helper
     def load_and_prepare_log(filepath):
         df = pd.read_csv(filepath, converters={'data': eval})
-        df['datetime'] = pd.to_timedelta(df['time'], unit='h') + pd.Timestamp('2025-01-02')
+        df.dropna(how='any')
+
+        df['datetime'] = pd.to_timedelta(df['time'], unit='h') + pd.Timestamp(start_time)
+
         return df
 
-    fig, axes = plt.subplots(3, 2, figsize=(15, 12), sharex=True, sharey=True)
+    fig, axes = plt.subplots(2, 2, figsize=(20, 9), sharex=True, sharey=True)
     axes = axes.flatten()
 
     sns.set(style="whitegrid")

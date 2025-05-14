@@ -64,3 +64,17 @@ location_id_to_index = {id_: i for i, id_ in enumerate(location_ids)}
 num_locations = len(location_ids)
 
 taxi_type = 'fhvhv' # 'green', 'fhv', 'fhvhv'
+
+
+'''For robust experiment only:'''
+robust_indmap = {0: 196,
+    1: 71,
+    2: 121,
+    3: 152,
+    4: 206,
+    5: 115,
+    6: 94,
+    7: 144,
+    8: 143,
+    9: 98,
+    10: 99}
