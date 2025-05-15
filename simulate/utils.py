@@ -160,30 +160,30 @@ def prepare_arrival_events_from_real_data(df, num_days=3):
     # Pack into list of event dicts
     return df_sel[['t_sim', 'pu_idx', 'do_idx', 'trip_time_hr']].to_dict('records')
 
-def get_rider_arrival_timeseries(df_log, region_id, bin_minutes=20):
+def get_rider_arrival_timeseries(df_log, region_ids, bin_minutes=20):
     arrivals = df_log[df_log['event_type'] == RIDER_ARRIVAL].copy()
     arrivals['region'] = arrivals['data'].apply(lambda x: x['region'])
-    arrivals = arrivals[arrivals['region'] == region_id]
+    arrivals = arrivals[arrivals['region'].isin(region_ids)]
 
     arrivals['time_bin'] = arrivals['datetime'].dt.floor(f'{bin_minutes}min')
     arrival_counts = arrivals.groupby('time_bin').size().reset_index(name='num_arrivals')
 
     return arrival_counts
 
-def get_ridestarts_timeseries(df_log, region_id, bin_minutes=20):
+def get_ridestarts_timeseries(df_log, region_ids, bin_minutes=20):
     ride_starts = df_log[df_log['event_type'] == RIDE_START].copy()
     ride_starts['region'] = ride_starts['data'].apply(lambda x: x['origin'])
-    ride_starts = ride_starts[ride_starts['region'] == region_id]
+    ride_starts = ride_starts[ride_starts['region'].isin(region_ids)]
 
     ride_starts['time_bin'] = ride_starts['datetime'].dt.floor(f'{bin_minutes}min')
     ride_starts = ride_starts.groupby('time_bin').size().reset_index(name='num_ridestarts')
 
     return ride_starts
 
-def get_rider_lost_timeseries(df_log, region_id, bin_minutes=20):
+def get_rider_lost_timeseries(df_log, region_ids, bin_minutes=20):
     lost_rides = df_log[df_log['event_type'] == RIDER_LOST].copy()
     lost_rides['region'] = lost_rides['data'].apply(lambda x: x['region'])
-    lost_rides = lost_rides[lost_rides['region'] == region_id]
+    lost_rides = lost_rides[lost_rides['region'].isin(region_ids)]
 
     lost_rides['time_bin'] = lost_rides['datetime'].dt.floor(f'{bin_minutes}min')
     lost_rides = lost_rides.groupby('time_bin').size().reset_index(name='num_lost_rides')
@@ -242,11 +242,17 @@ def plot_arrival_versus_ridestarts(df_log, region_id, bin_minutes):
     plt.legend()
     plt.tight_layout()
     plt.show()
-    
+
+######################
+###################
+'''PLot simulation'''
+##################
+#####################
+
 def plot_simulation_grid_for_strategies(
     demand_mode: str,
     strategies: list,
-    region_id: int,
+    region_ids: list,
     bin_minutes: int = 20,
     log_dir: str = "sim_outputs",
     start_time: str = '2025-01-02'
@@ -287,9 +293,9 @@ def plot_simulation_grid_for_strategies(
 
         df_log = load_and_prepare_log(path)
 
-        arrival_ts = get_rider_arrival_timeseries(df_log, region_id=region_id, bin_minutes=bin_minutes)
-        ridestarts_ts = get_ridestarts_timeseries(df_log, region_id=region_id, bin_minutes=bin_minutes)
-        lostrides_ts = get_rider_lost_timeseries(df_log, region_id=region_id, bin_minutes=bin_minutes)
+        arrival_ts = get_rider_arrival_timeseries(df_log, region_ids=region_ids, bin_minutes=bin_minutes)
+        ridestarts_ts = get_ridestarts_timeseries(df_log, region_ids=region_ids, bin_minutes=bin_minutes)
+        lostrides_ts = get_rider_lost_timeseries(df_log, region_ids=region_ids, bin_minutes=bin_minutes)
 
         if arrival_ts.empty:
             print(f"No arrival data for strategy {strategy}.")
@@ -315,11 +321,17 @@ def plot_simulation_grid_for_strategies(
             ax.set_xlabel("Time")
 
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc='upper center', ncol=3)
-    fig.suptitle(
-        f"Rider Arrivals, Ride Starts, and Lost Riders\nRegion {region_id} — {demand_mode.capitalize()} Demand",
-        fontsize=16
-    )
+    fig.legend(handles, labels, loc='best', ncol=3)
+    if len(region_ids) == 1:
+        fig.suptitle(
+            f"Rider Arrivals, Ride Starts, and Lost Riders\nRegion {region_ids[0]} — {demand_mode.capitalize()} Demand",
+            fontsize=16
+        )
+    else:
+        fig.suptitle(
+            f"Rider Arrivals, Ride Starts, and Lost Riders\n {len(region_ids)} Regions — {demand_mode.capitalize()} Demand",
+            fontsize=16
+        )
     plt.tight_layout(rect=[0, 0, 1, 0.96])
     plt.show()
 
